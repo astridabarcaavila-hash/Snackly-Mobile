@@ -2,24 +2,14 @@
   "id": "./",
   "name": "Snackly – Quiosco escolar",
   "short_name": "Snackly",
-  "description": "Pedidos escolares para familias y quiosco, con QR de agenda, pagos, recojo y calificaciones.",
+  "description": "Pedidos escolares para familias y quiosco con canasta, seguimiento, pagos y QR.",
   "lang": "es-PE",
-  "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": [
-    "standalone",
-    "minimal-ui"
-  ],
   "orientation": "portrait-primary",
   "background_color": "#07172d",
   "theme_color": "#07172d",
-  "categories": [
-    "food",
-    "education",
-    "shopping"
-  ],
   "icons": [
     {
       "src": "icons/icon-192.png",
@@ -38,34 +28,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "Hacer pedido",
-      "short_name": "Pedido",
-      "description": "Abrir Snackly para realizar un pedido.",
-      "url": "./",
-      "icons": [
-        {
-          "src": "icons/icon-96.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": "Mis pedidos",
-      "short_name": "Pedidos",
-      "description": "Consultar pedidos escolares.",
-      "url": "./",
-      "icons": [
-        {
-          "src": "icons/icon-96.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
     }
   ]
 }
