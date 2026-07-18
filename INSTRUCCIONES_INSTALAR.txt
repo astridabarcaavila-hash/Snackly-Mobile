@@ -1,0 +1,37 @@
+SNACKLY MOBILE — PWA INSTALABLE
+
+ESTA CARPETA YA ESTÁ PREPARADA COMO APLICACIÓN WEB INSTALABLE.
+
+IMPORTANTE
+Una PWA debe abrirse desde una dirección HTTPS. No se instala correctamente
+abriendo index.html directamente desde la carpeta Descargas.
+
+OPCIÓN RECOMENDADA: GITHUB PAGES
+1. Crea un repositorio nuevo, por ejemplo: Snackly-Mobile.
+2. Sube TODO el contenido de esta carpeta a la raíz del repositorio.
+3. En GitHub entra a Settings > Pages.
+4. En Source selecciona “Deploy from a branch”.
+5. Selecciona la rama main y la carpeta /(root).
+6. Espera a que GitHub muestre el enlace publicado.
+7. Abre ese enlace en Chrome desde el celular.
+8. Pulsa el botón “Instalar” de Snackly.
+   También puedes usar el menú ⋮ de Chrome > Instalar aplicación.
+
+PRUEBA EN COMPUTADORA
+Windows:
+- Ejecuta INICIAR_EN_PC.bat
+- Abre http://localhost:8080
+
+Mac/Linux:
+- Ejecuta ./iniciar_en_pc.sh
+- Abre http://localhost:8080
+
+AL INSTALARSE
+- Aparece un ícono de Snackly en la pantalla de inicio.
+- Se abre sin la barra normal del navegador.
+- Conserva datos locales y puede abrir el contenido principal sin conexión.
+
+NOTA
+La versión PWA funciona como una aplicación instalada, pero la sincronización
+real entre el celular de los padres y el equipo del quiosco requiere una base
+de datos en línea.
