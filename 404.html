@@ -1038,23 +1038,29 @@ body.sheet-open{overflow:hidden}
 
 
 <style>
-/* SNACKLY V8 — control administrativo y métricas */
+/* SNACKLY V8.1 — panel administrativo */
 .kiosk-auth-only{display:none}
 .kiosk-auth-only.show{display:block}
 .admin-security-note{padding:11px 13px;border-radius:12px;background:#eef6ff;border-left:5px solid #2f7dcc;color:#24486d;line-height:1.45;font-size:.86rem}
-.admin-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:14px}
-.admin-metric-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 7px 20px rgba(7,23,45,.06)}
-.admin-metric-card small{display:block;color:var(--muted);font-weight:800}
-.admin-metric-card strong{display:block;font-size:1.65rem;margin-top:5px;color:var(--navy)}
-.admin-metric-card span{display:block;color:var(--muted);font-size:.76rem;margin-top:4px}
-.admin-kpi-positive{background:#f0f8e8;border-color:#d6ebbc}
-.admin-kpi-warning{background:#fff8df;border-color:#f2df9b}
-.admin-kpi-danger{background:#fff0f0;border-color:#f0c5c5}
+.kiosk-summary-head{align-items:flex-end}
+.kiosk-periods{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.kiosk-period-btn{border:1px solid var(--line);background:#fff;color:var(--navy);border-radius:999px;padding:8px 13px;font-weight:900;cursor:pointer;transition:.15s}
+.kiosk-period-btn:hover{border-color:#9db2c7;background:#f7fafc}
+.kiosk-period-btn.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+.admin-metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.admin-metric-card{position:relative;min-height:138px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 7px 20px rgba(7,23,45,.06);overflow:hidden}
+.admin-metric-card small{display:block;color:var(--muted);font-weight:800;padding-right:44px}
+.admin-metric-card strong{display:block;font-size:1.65rem;margin-top:7px;color:var(--navy)}
+.admin-metric-card span{display:block;color:var(--muted);font-size:.76rem;margin-top:5px;line-height:1.35}
+.metric-icon{position:absolute;top:14px;right:14px;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:#eef4f8;border:1px solid #dbe6ee;font-size:1.05rem;box-shadow:0 3px 10px rgba(7,23,45,.05)}
+.admin-kpi-positive{background:#f0f8e8;border-color:#d6ebbc}.admin-kpi-positive .metric-icon{background:#e3f2d1;border-color:#cce6ae}
+.admin-kpi-warning{background:#fff8df;border-color:#f2df9b}.admin-kpi-warning .metric-icon{background:#fff0b9;border-color:#ead88c}
+.admin-kpi-danger{background:#fff0f0;border-color:#f0c5c5}.admin-kpi-danger .metric-icon{background:#ffe0e0;border-color:#efc0c0}
 .admin-analytics-note{margin-top:12px;padding:12px 14px;border-radius:13px;background:#f7f9fc;border:1px solid var(--line);color:var(--muted);line-height:1.45;font-size:.82rem}
 .subscription-card{margin-top:16px;border:1px solid #cfe0ec;background:linear-gradient(135deg,#edf7ff,#fff);border-radius:18px;padding:16px}
 .subscription-card strong{color:var(--navy)}
-@media(max-width:900px){.admin-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:520px){.admin-metric-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.admin-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.kiosk-summary-head{align-items:flex-start;gap:12px}}
+@media(max-width:620px){.kiosk-periods{width:100%;justify-content:flex-start}.kiosk-period-btn{flex:1}.admin-metric-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -1200,7 +1206,12 @@ body.sheet-open{overflow:hidden}
    <section id="view-kiosk" class="view kiosk-only">
     <div class="section-head"><div><h2>Panel del quiosco</h2><p>Escanea el QR existente de la agenda para identificar al alumno.</p></div></div>
     <div id="kioskStats" class="admin-grid"></div>
-    <div class="section-head"><div><h3>Resumen diario del quiosco</h3><p>Indicadores de pedidos, cancelaciones y dinero generado.</p></div></div>
+    <div class="section-head kiosk-summary-head"><div><h3>Resumen del quiosco</h3><p id="kioskPeriodLabel">Indicadores de pedidos, cancelaciones y dinero generado.</p></div>
+     <div class="kiosk-periods" role="group" aria-label="Periodo del resumen">
+      <button type="button" class="kiosk-period-btn active" data-period="today" onclick="setKioskPeriod('today')">Hoy</button>
+      <button type="button" class="kiosk-period-btn" data-period="week" onclick="setKioskPeriod('week')">7 días</button>
+      <button type="button" class="kiosk-period-btn" data-period="month" onclick="setKioskPeriod('month')">Este mes</button>
+     </div></div>
     <div id="kioskDailyMetrics" class="admin-metric-grid"></div>
     <div id="kioskSubscriptionInfo" class="subscription-card"></div>
     <div class="section-head"><div><h3>Visitas e instalaciones</h3><p>Indicadores de uso registrados por esta versión de demostración.</p></div></div>
@@ -1481,6 +1492,7 @@ let scannerTargetInput="";
 let scannerSuccessCallback=null;
 let menuCategory="Todos";
 let ordersFilter="active";
+let kioskPeriod="today";
 
 function save(){
  localStorage.setItem(P+"user",JSON.stringify(state.user));
@@ -1565,6 +1577,23 @@ function orderDay(order){return order.createdISO||order.deliveryDate||localISO()
 function isPaidOrder(order){return order.paymentStatus==="Pagado"&&order.orderStatus!=="Cancelado"}
 function isDigitalPayment(order){return ["Yape simulado","Plin simulado","Transferencia simulada"].includes(order.paymentMethod)}
 function snacklyCommission(order){return isPaidOrder(order)&&isDigitalPayment(order)?0.30:0}
+function kioskPeriodStart(period){
+ const d=new Date();
+ if(period==="week")d.setDate(d.getDate()-6);
+ if(period==="month")d.setDate(1);
+ return localISO(d)
+}
+function kioskPeriodLabel(period){
+ if(period==="week")return "Últimos 7 días";
+ if(period==="month")return "Este mes";
+ return "Hoy";
+}
+function setKioskPeriod(period){
+ kioskPeriod=period;
+ $$(".kiosk-period-btn").forEach(btn=>btn.classList.toggle("active",btn.dataset.period===period));
+ renderKiosk();
+}
+window.setKioskPeriod=setKioskPeriod;
 
 function init(){
  bindNav();
@@ -2209,46 +2238,49 @@ window.createStudentRequest=createStudentRequest;
 
 function renderKiosk(){
  if(!isAdminAuthenticated())return;
- const day=localISO();
- const todaysOrders=state.orders.filter(o=>orderDay(o)===day);
- const completed=todaysOrders.filter(o=>o.orderStatus==="Entregado");
- const cancelled=todaysOrders.filter(o=>o.orderStatus==="Cancelado");
- const active=todaysOrders.filter(o=>!['Entregado','Cancelado'].includes(o.orderStatus));
- const paid=todaysOrders.filter(isPaidOrder);
+ const startDate=kioskPeriodStart(kioskPeriod);
+ const endDate=localISO();
+ const periodOrders=state.orders.filter(o=>{const d=orderDay(o);return d>=startDate&&d<=endDate});
+ const completed=periodOrders.filter(o=>o.orderStatus==="Entregado");
+ const cancelled=periodOrders.filter(o=>o.orderStatus==="Cancelado");
+ const active=periodOrders.filter(o=>!['Entregado','Cancelado'].includes(o.orderStatus));
+ const paid=periodOrders.filter(isPaidOrder);
  const sales=paid.reduce((a,o)=>a+Number(o.total||0),0);
  const commission=paid.reduce((a,o)=>a+snacklyCommission(o),0);
  const kioskNet=Math.max(0,sales-commission);
- const todaysRatings=state.ratings.filter(r=>r.dateISO===day);
+ const todaysRatings=state.ratings.filter(r=>r.dateISO===localISO());
  const avg=todaysRatings.length
   ? (todaysRatings.reduce((a,r)=>a+r.stars,0)/todaysRatings.length).toFixed(1)
   : "—";
- const visitsToday=Number(state.metrics?.dailyVisits?.[day]||0);
+ const visitsToday=Number(state.metrics?.dailyVisits?.[localISO()]||0);
  const totalVisits=Number(state.metrics?.totalVisits||0);
  const uniqueVisitors=Number(state.metrics?.uniqueVisitors||0);
  const installs=Number(state.metrics?.installedCount||0);
 
  $("#kioskStats").innerHTML=`
  <div class="card stat"><div><small>Estudiantes registrados</small><strong>${state.children.length}</strong></div><div class="bubble">🎒</div></div>
- <div class="card stat"><div><small>Pedidos activos hoy</small><strong>${active.length}</strong></div><div class="bubble">📦</div></div>
+ <div class="card stat"><div><small>Pedidos activos</small><strong>${active.length}</strong></div><div class="bubble">📦</div></div>
  <div class="card stat"><div><small>Pagos por verificar</small><strong>${state.orders.filter(o=>o.paymentStatus==="Por verificar").length}</strong></div><div class="bubble">🔍</div></div>
  <div class="card stat"><div><small>Calificación de hoy</small><strong>${avg}${avg==="—"?"":" ★"}</strong></div><div class="bubble">⭐</div></div>`;
 
- $("#kioskDailyMetrics").innerHTML=`
- <div class="admin-metric-card admin-kpi-positive"><small>Pedidos realizados hoy</small><strong>${todaysOrders.length}</strong><span>Todos los pedidos creados durante el día.</span></div>
- <div class="admin-metric-card"><small>Pedidos entregados</small><strong>${completed.length}</strong><span>Pedidos completados correctamente.</span></div>
- <div class="admin-metric-card admin-kpi-danger"><small>Pedidos cancelados</small><strong>${cancelled.length}</strong><span>Incluye cancelaciones registradas por el quiosco.</span></div>
- <div class="admin-metric-card"><small>Ventas cobradas</small><strong>${money(sales)}</strong><span>Solo pagos confirmados.</span></div>
- <div class="admin-metric-card admin-kpi-warning"><small>Comisión Snackly</small><strong>${money(commission)}</strong><span>S/ 0.30 por pago digital confirmado.</span></div>
- <div class="admin-metric-card"><small>Ingreso neto del quiosco</small><strong>${money(kioskNet)}</strong><span>Ventas cobradas menos comisión digital.</span></div>`;
+ $("#kioskPeriodLabel").textContent=`${kioskPeriodLabel(kioskPeriod)} · pedidos, cancelaciones y dinero generado`;
 
- $("#kioskSubscriptionInfo").innerHTML=`<strong>Suscripción del quiosco</strong><br><span>Primer mes: <strong>GRATIS</strong> para prueba. Después: <strong>S/ 3.00 mensuales</strong>.</span>`;
+ $("#kioskDailyMetrics").innerHTML=`
+ <div class="admin-metric-card admin-kpi-positive"><div class="metric-icon" aria-hidden="true">🧾</div><small>Pedidos realizados</small><strong>${periodOrders.length}</strong><span>Pedidos creados en ${kioskPeriodLabel(kioskPeriod).toLowerCase()}.</span></div>
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">✓</div><small>Pedidos entregados</small><strong>${completed.length}</strong><span>Pedidos completados correctamente.</span></div>
+ <div class="admin-metric-card admin-kpi-danger"><div class="metric-icon" aria-hidden="true">✕</div><small>Pedidos cancelados</small><strong>${cancelled.length}</strong><span>Cancelaciones registradas por el quiosco.</span></div>
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">💳</div><small>Ventas cobradas</small><strong>${money(sales)}</strong><span>Solo pagos confirmados.</span></div>
+ <div class="admin-metric-card admin-kpi-warning"><div class="metric-icon" aria-hidden="true">%</div><small>Comisión Snackly</small><strong>${money(commission)}</strong><span>S/ 0.30 por pago digital confirmado.</span></div>
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">💰</div><small>Ingreso neto del quiosco</small><strong>${money(kioskNet)}</strong><span>Ventas cobradas menos comisión digital.</span></div>`;
+
+ $("#kioskSubscriptionInfo").innerHTML=`<strong>🏪 Suscripción del quiosco</strong><br><span>Primer mes: <strong>GRATIS</strong> para prueba. Después: <strong>S/ 3.00 mensuales</strong>.</span>`;
 
  $("#kioskUsageMetrics").innerHTML=`
- <div class="admin-metric-card"><small>Visitas hoy</small><strong>${visitsToday}</strong><span>Sesiones registradas en este navegador.</span></div>
- <div class="admin-metric-card"><small>Visitas totales</small><strong>${totalVisits}</strong><span>Acumuladas en esta demostración.</span></div>
- <div class="admin-metric-card"><small>Usuarios únicos</small><strong>${uniqueVisitors}</strong><span>Identificadores únicos de este dispositivo.</span></div>
- <div class="admin-metric-card"><small>Instalaciones</small><strong>${installs}</strong><span>Instalaciones PWA detectadas en este dispositivo.</span></div>`;
- $("#kioskAnalyticsNote").innerHTML=`<strong>Importante:</strong> como Snackly V8 es un prototipo estático publicado en GitHub Pages, estos contadores funcionan como <strong>métricas de demostración locales</strong>. Para conocer visitas, usuarios y descargas reales de todos los dispositivos se necesitará un servicio de analítica o un backend centralizado.`;
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">👁</div><small>Visitas hoy</small><strong>${visitsToday}</strong><span>Sesiones registradas en este navegador.</span></div>
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">📊</div><small>Visitas totales</small><strong>${totalVisits}</strong><span>Acumuladas en esta demostración.</span></div>
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">👥</div><small>Usuarios únicos</small><strong>${uniqueVisitors}</strong><span>Identificadores únicos de este dispositivo.</span></div>
+ <div class="admin-metric-card"><div class="metric-icon" aria-hidden="true">📲</div><small>Instalaciones</small><strong>${installs}</strong><span>Instalaciones PWA detectadas en este dispositivo.</span></div>`;
+ $("#kioskAnalyticsNote").innerHTML=`<strong>Importante:</strong> como Snackly V8.1 es un prototipo estático publicado en GitHub Pages, estos contadores funcionan como <strong>métricas de demostración locales</strong>. Para conocer visitas, usuarios y descargas reales de todos los dispositivos se necesitará un servicio de analítica o un backend centralizado.`;
 
  $("#kioskRatingSummary").innerHTML=todaysRatings.length
   ? todaysRatings.slice(0,4).map(r=>`

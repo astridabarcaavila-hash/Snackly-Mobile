@@ -1,5 +1,5 @@
 
-const CACHE="snackly-v8-admin-metrics";
+const CACHE="snackly-v8-1-admin-panel";
 const ASSETS=[
  "./","./index.html","./offline.html","./manifest.webmanifest",
  "./icons/icon-32.png","./icons/icon-96.png","./icons/icon-180.png",
