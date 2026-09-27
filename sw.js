@@ -1,7 +1,7 @@
 
-const CACHE="snackly-v8-1-admin-panel";
+const CACHE="snackly-v9-mejoras-cloud";
 const ASSETS=[
- "./","./index.html","./offline.html","./manifest.webmanifest",
+ "./","./index.html","./offline.html","./manifest.webmanifest","./supabase-config.js",
  "./icons/icon-32.png","./icons/icon-96.png","./icons/icon-180.png",
  "./icons/icon-192.png","./icons/icon-512.png","./icons/icon-maskable-512.png"
 ];
