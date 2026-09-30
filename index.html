@@ -3030,5 +3030,508 @@ document.addEventListener("DOMContentLoaded",init)
 }
 </style>
 
+
+<script>
+/* ==========================================================
+   SNACKLY V10 — PERSISTENCIA CENTRAL MULTI-DISPOSITIVO
+   Mantiene el modelo visual V7 y reemplaza app_state como
+   almacén de pedidos, quioscos, pagos y visitas.
+   ========================================================== */
+(function(){
+  const CLOUD=window.SNACKLY_CLOUD||{};
+  const enabled=()=>!!(CLOUD.url&&CLOUD.anonKey);
+  const api=()=>CLOUD.url.replace(/\/$/,"")+"/rest/v1/";
+  const headers=(extra={})=>Object.assign({apikey:CLOUD.anonKey,Authorization:"Bearer "+CLOUD.anonKey,"Content-Type":"application/json"},extra);
+  let openApiPromise=null, schemaCache={};
+  const nowISO=()=>new Date().toISOString();
+  const uid2=(p="SNK")=>p+"-"+crypto.randomUUID();
+
+  async function openApi(){
+    if(!enabled())return null;
+    if(!openApiPromise){
+      openApiPromise=fetch(CLOUD.url.replace(/\/$/,"")+"/rest/v1/",{headers:headers()})
+        .then(r=>r.ok?r.json():null).catch(()=>null);
+    }
+    return openApiPromise;
+  }
+  async function schema(table){
+    if(schemaCache[table])return schemaCache[table];
+    const spec=await openApi();
+    if(!spec){schemaCache[table]=null;return null}
+    let def=null;
+    if(spec.definitions)def=spec.definitions[table];
+    if(!def&&spec.components?.schemas)def=spec.components.schemas[table];
+    schemaCache[table]=def||null;
+    return schemaCache[table];
+  }
+  const fieldsOf=def=>Object.keys(def?.properties||{});
+  async function column(table,aliases){
+    const def=await schema(table), fields=fieldsOf(def);
+    return pick(fields,aliases)||aliases[0];
+  }
+  function pick(fields,aliases){
+    for(const a of aliases){
+      if(fields.includes(a))return a;
+    }
+    return null;
+  }
+  function build(table, data){
+    return schema(table).then(def=>{
+      const fields=fieldsOf(def), out={};
+      const aliases={
+        id:["id","uuid","record_id","kiosk_id","order_id","visit_id","payment_id","subscription_id"],
+        kioskId:["kiosk_id","kioskId","quiosco_id","kiosk"],
+        orderId:["order_id","orderId","pedido_id"],
+        institution:["institution","institution_name","school","school_name","ie_name","name"],
+        responsible:["responsible","responsible_name","manager","manager_name","owner","owner_name"],
+        email:["email","correo","correo_electronico"],
+        registrationDate:["registration_date","registrationDate","registered_at","registeredAt"],
+        cardLast4:["card_last4","card_last_4","last4","cardLast4"],
+        active:["active","is_active","activo"],
+        status:["status","state","estado"],
+        createdAt:["created_at","createdAt","created"],
+        updatedAt:["updated_at","updatedAt"],
+        parent:["parent","parent_name","family","family_name"],
+        childId:["child_id","childId","student_id","studentId"],
+        child:["child","child_name","student","student_name"],
+        grade:["grade","school_grade","grado"],
+        agendaQr:["agenda_qr","agendaQr","qr","qr_code"],
+        deliveryDate:["delivery_date","deliveryDate","date","order_date"],
+        pickupTime:["pickup_time","pickupTime","time"],
+        pickupWindow:["pickup_window","pickupWindow"],
+        pickupDeadline:["pickup_deadline","pickupDeadline"],
+        exitPickup:["exit_pickup","exitPickup"],
+        items:["items","order_items","details","items_json"],
+        total:["total","amount","order_total","total_amount"],
+        paymentMethod:["payment_method","paymentMethod","method"],
+        paymentReference:["payment_reference","paymentReference","reference","operation"],
+        paymentStatus:["payment_status","paymentStatus","status_payment"],
+        paymentDecision:["payment_decision","paymentDecision"],
+        orderStatus:["order_status","orderStatus","status_order"],
+        source:["source","origin","order_source"],
+        createdISO:["created_iso","createdISO","created_at","createdAt"],
+        paidAt:["paid_at","paidAt"],
+        productId:["product_id","productId","item_id"],
+        name:["name","product_name","item_name"],
+        qty:["qty","quantity","cantidad"],
+        price:["price","unit_price","unitPrice","precio"],
+        type:["type","item_type","product_type"],
+        icon:["icon","emoji"],
+        itemTotal:["item_total","line_total","subtotal"],
+        amount:["amount","total","paid_amount","payment_amount"],
+        commission:["commission","snackly_commission","fee"],
+        paidDate:["paid_at","payment_date","paidDate","created_at"],
+        visitorId:["visitor_id","visitorId","device_id","client_id"],
+        visitedAt:["visited_at","visitedAt","created_at","createdAt"],
+        date:["date","visit_date","day"],
+        device:["device","device_type","platform"],
+        userAgent:["user_agent","userAgent"],
+        path:["path","page","url"],
+        period:["period","billing_period","month"],
+        rating:["rating","score","stars","calificacion"],
+        comment:["comment","comments","comentario","text"],
+        user:["user","user_name","username"],
+        recipient:["recipient","recipient_id","to"],
+        message:["message","text","content"]
+      };
+      Object.entries(data||{}).forEach(([key,val])=>{
+        if(val===undefined)return;
+        const col=pick(fields,aliases[key]||[key]);
+        if(col)out[col]=val;
+      });
+      // Fallback only when the schema endpoint is unavailable.
+      if(!def){
+        Object.entries(data||{}).forEach(([key,val])=>{if(val!==undefined)out[key]=val});
+      }
+      return {out,def,fields};
+    });
+  }
+  async function insert(table,data){
+    if(!enabled())return null;
+    try{
+      const b=await build(table,data);
+      const r=await fetch(api()+table,{method:"POST",headers:headers({Prefer:"return=representation"}),body:JSON.stringify(b.out)});
+      if(!r.ok){console.warn("Snackly insert "+table,await r.text());return null}
+      const a=await r.json();return a?.[0]||a||null;
+    }catch(e){console.warn("Snackly insert "+table,e);return null}
+  }
+  async function list(table,select="*"){
+    if(!enabled())return [];
+    try{
+      const r=await fetch(api()+table+"?select="+encodeURIComponent(select),{headers:headers()});
+      if(!r.ok){console.warn("Snackly list "+table,await r.text());return []}
+      const a=await r.json();return Array.isArray(a)?a:[];
+    }catch(e){console.warn("Snackly list "+table,e);return []}
+  }
+  async function patch(table,match,data){
+    if(!enabled())return null;
+    try{
+      const b=await build(table,data), parts=[];
+      for(const [k,v] of Object.entries(match)){
+        const aliases=k==="id"?["id","uuid","record_id","kiosk_id","order_id","visit_id","payment_id","subscription_id"]:[k];
+        const c=await column(table,aliases);parts.push(encodeURIComponent(c)+"=eq."+encodeURIComponent(v));
+      }
+      const r=await fetch(api()+table+"?"+parts.join("&"),{method:"PATCH",headers:headers({Prefer:"return=representation"}),body:JSON.stringify(b.out)});
+      if(!r.ok){console.warn("Snackly patch "+table,await r.text());return null}
+      const a=await r.json();return a?.[0]||null;
+    }catch(e){console.warn("Snackly patch "+table,e);return null}
+  }
+  function val(row,keys,def=""){
+    for(const k of keys){if(row&&row[k]!==undefined&&row[k]!==null)return row[k]}
+    return def;
+  }
+  function mapKiosk(r){return {id:String(val(r,["id","kiosk_id"])),institution:String(val(r,["institution","institution_name","school","school_name","name"])),responsible:String(val(r,["responsible","responsible_name","manager","manager_name"])),email:String(val(r,["email","correo"])),registrationDate:String(val(r,["registration_date","registrationDate","registered_at"],localISO())),cardLast4:String(val(r,["card_last4","card_last_4","last4","cardLast4"])),active:val(r,["active","is_active"],true)!==false,status:val(r,["status","state"],"Activa"),createdAt:val(r,["created_at","createdAt"],nowISO())};}
+  function mapOrder(r){
+    let items=val(r,["items","order_items","details"],[]);if(typeof items==="string"){try{items=JSON.parse(items)}catch(e){items=[]}}
+    return {id:String(val(r,["id","order_id"])),source:val(r,["source","origin"],"parent_order"),parent:val(r,["parent","parent_name","family_name"]),childId:val(r,["child_id","childId","student_id"]),child:val(r,["child","child_name","student_name"]),grade:val(r,["grade","school_grade"]),institution:val(r,["institution","institution_name","school"]),kioskId:val(r,["kiosk_id","kioskId"]),kioskName:val(r,["kiosk_name","institution","school"]),agendaQr:val(r,["agenda_qr","agendaQr","qr"]),deliveryDate:val(r,["delivery_date","deliveryDate","date"]),pickupTime:val(r,["pickup_time","pickupTime","time"]),pickupWindow:val(r,["pickup_window","pickupWindow"]),pickupDeadline:val(r,["pickup_deadline","pickupDeadline"]),exitPickup:val(r,["exit_pickup","exitPickup"]),items:Array.isArray(items)?items:[],total:Number(val(r,["total","amount","order_total"],0)),paymentMethod:val(r,["payment_method","paymentMethod","method"]),paymentReference:val(r,["payment_reference","paymentReference","reference"]),paymentStatus:val(r,["payment_status","paymentStatus"]),paymentDecision:val(r,["payment_decision","paymentDecision"]),orderStatus:val(r,["order_status","orderStatus","status"],"Recibido"),created:val(r,["created","created_at","createdAt"],nowISO()),createdISO:String(val(r,["created_iso","createdISO","created_at"],localISO())),paidAt:val(r,["paid_at","paidAt"],"")};
+  }
+  let visitOnce=false;
+  async function centralLoad(){
+    if(!enabled())return;
+    const [ks,os]=await Promise.all([list("kiosks"),list("orders")]);
+    const remoteK=ks.map(mapKiosk), remoteO=os.map(mapOrder);
+    const merge=(local,remote)=>{
+      const m=new Map();
+      [...(local||[]),...(remote||[])].forEach(x=>{if(x?.id)m.set(String(x.id),x)});
+      // Remote wins only when the same id exists; unsynced local records remain.
+      (remote||[]).forEach(x=>{if(x?.id)m.set(String(x.id),x)});
+      return [...m.values()];
+    };
+    state.kiosks=merge(state.kiosks,remoteK);
+    state.orders=merge(state.orders,remoteO);
+    localStorage.setItem(P+"kiosks",JSON.stringify(state.kiosks||[]));
+    localStorage.setItem(P+"orders",JSON.stringify(state.orders||[]));
+    refreshInstitutionOptions?.();renderAll?.();applyRole?.();
+  }
+  async function pushKiosk(k){
+    if(!enabled()||!k?.id)return;
+    const data={id:k.id,institution:k.institution,responsible:k.responsible,email:k.email,registrationDate:k.registrationDate,cardLast4:k.cardLast4,active:k.active,status:k.active?"Activa":"Cancelada",createdAt:k.createdAt||nowISO()};
+    const existing=await list("kiosks","*");
+    const hit=existing.find(x=>String(val(x,["id","kiosk_id"]))===String(k.id));
+    if(hit)await patch("kiosks",{id:val(hit,["id","kiosk_id"])},data);else await insert("kiosks",data);
+  }
+  async function pushOrder(order){
+    if(!enabled()||!order?.id)return;
+    const data={id:order.id,source:order.source,parent:order.parent,childId:order.childId,child:order.child,grade:order.grade,institution:order.institution,kioskId:order.kioskId,kioskName:order.kioskName,agendaQr:order.agendaQr,deliveryDate:order.deliveryDate,pickupTime:order.pickupTime,pickupWindow:order.pickupWindow,pickupDeadline:order.pickupDeadline,exitPickup:order.exitPickup,items:JSON.stringify(order.items||[]),total:Number(order.total||0),paymentMethod:order.paymentMethod,paymentReference:order.paymentReference,paymentStatus:order.paymentStatus,paymentDecision:order.paymentDecision,orderStatus:order.orderStatus,created:order.created,createdISO:order.createdISO,paidAt:order.paidAt||null};
+    const got=await insert("orders",data);
+    // If orders has no JSON items column, store the individual lines in order_items.
+    if(got!==null){
+      const itemSchema=await schema("order_items"), itemFields=fieldsOf(itemSchema);
+      if(itemFields.length){
+        for(const it of (order.items||[]))await insert("order_items",{id:uid2("IT"),orderId:order.id,kioskId:order.kioskId,productId:it.id,name:it.name,qty:Number(it.qty||1),price:Number(it.price||0),type:it.type,icon:it.icon,itemTotal:Number(it.price||0)*Number(it.qty||1)});
+      }
+    }
+    if(got!==null && isDigitalPayment(order) && order.paymentStatus==="Pagado"){
+      await insert("payments",{id:uid2("PAY"),orderId:order.id,kioskId:order.kioskId,amount:Number(order.total||0),method:order.paymentMethod,reference:order.paymentReference,status:"Pagado",commission:0.30,paidDate:order.paidAt||nowISO()});
+    }
+  }
+  async function centralVisit(){
+    if(!enabled()||visitOnce)return;visitOnce=true;
+    let vid=localStorage.getItem("snacklyVisitorId");if(!vid){vid=uid2("VIS");localStorage.setItem("snacklyVisitorId",vid)}
+    await insert("visits",{id:uid2("VST"),visitorId:vid,date:localISO(),visitedAt:nowISO(),device:/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)?"mobile":"desktop",userAgent:navigator.userAgent,path:location.pathname});
+  }
+  const nativeSave=window.save;
+  window.save=function(){nativeSave?.();};
+  const oldRecordVisit=window.recordVisit;
+  window.recordVisit=async function(){
+    try{oldRecordVisit?.()}catch(e){}
+    centralVisit();
+  };
+  const oldSaveKiosk=window.saveKioskRegistration;
+  window.saveKioskRegistration=async function(){
+    const before=Array.isArray(state.kiosks)?state.kiosks.map(k=>k.id):[];
+    const result=oldSaveKiosk?.apply(this,arguments);
+    const added=(state.kiosks||[]).find(k=>!before.includes(k.id));
+    if(added)await pushKiosk(added);else {const current=typeof getKiosk==="function"?getKiosk():null;if(current)await pushKiosk(current)}
+    await centralLoad();return result;
+  };
+  const oldCreateParentOrder=window.createParentOrder;
+  window.createParentOrder=async function(date,time,method,reference){
+    // The V9 function already enforces digital payment and preserves the V7 UI.
+    const before=new Set((state.orders||[]).map(o=>o.id));
+    const result=oldCreateParentOrder?.apply(this,arguments);
+    const created=(state.orders||[]).find(o=>!before.has(o.id));
+    if(created){
+      const kiosk=typeof getKiosk==="function"?getKiosk():null;
+      if(!created.kioskId && kiosk)created.kioskId=kiosk.id;
+      if(!created.kioskName && kiosk)created.kioskName=kiosk.institution;
+      await pushOrder(created);
+      await centralLoad();
+    }
+    return result;
+  };
+  // Keep the old shared snapshot functions harmless: transactional data no longer uses app_state.
+  window.snacklyCloudPush=async function(){};
+  window.snacklyCloudSync=async function(){await centralLoad();await centralVisit();return true};
+  // Run once after the existing V7/V9 boot code has initialized state and DOM.
+  async function bootV10(){
+    if(!enabled())return;
+    await centralLoad();
+    await centralVisit();
+    renderAll?.();applyRole?.();
+  }
+  window.snacklySeedCentralData=async function(kiosks,orders){
+    if(!enabled())return;
+    const existingK=await list("kiosks","*");
+    for(const k of (kiosks||[])){
+      const hit=existingK.find(x=>String(val(x,["id","kiosk_id"]))===String(k.id)||normalize(String(val(x,["institution","institution_name","school","school_name","name"])))===normalize(String(k.institution)));
+      if(hit)await patch("kiosks",{id:val(hit,["id","kiosk_id"])},{institution:k.institution,responsible:k.responsible,email:k.email,registrationDate:k.registrationDate,cardLast4:k.cardLast4,active:true,status:"Activa",createdAt:k.createdAt||nowISO()});
+      else await insert("kiosks",{id:k.id,institution:k.institution,responsible:k.responsible,email:k.email,registrationDate:k.registrationDate,cardLast4:k.cardLast4,active:true,status:"Activa",createdAt:k.createdAt||nowISO()});
+    }
+    const existingO=await list("orders","*");
+    const knownO=new Set(existingO.map(x=>String(val(x,["id","order_id"]))).filter(Boolean));
+    const pending=(orders||[]).filter(o=>!knownO.has(String(o.id)));
+    if(!pending.length)return;
+    const b=await Promise.all(pending.map(o=>build("orders",{id:o.id,source:o.source,parent:o.parent,childId:o.childId,child:o.child,grade:o.grade,institution:o.institution,kioskId:o.kioskId,kioskName:o.kioskName,agendaQr:o.agendaQr,deliveryDate:o.deliveryDate,pickupTime:o.pickupTime,pickupWindow:o.pickupWindow,pickupDeadline:o.pickupDeadline,exitPickup:o.exitPickup,items:JSON.stringify(o.items||[]),total:Number(o.total||0),paymentMethod:o.paymentMethod,paymentReference:o.paymentReference,paymentStatus:o.paymentStatus,paymentDecision:o.paymentDecision,orderStatus:o.orderStatus,created:o.created,createdISO:o.createdISO,paidAt:o.paidAt||null})));
+    const r=await fetch(api()+"orders",{method:"POST",headers:headers({Prefer:"return=minimal"}),body:JSON.stringify(b.map(x=>x.out))});
+    if(!r.ok){console.warn("Snackly bulk orders",await r.text());return;}
+    const paymentRows=pending.filter(o=>isDigitalPayment(o)&&o.paymentStatus==="Pagado").map(o=>({id:"PAY-"+o.id,orderId:o.id,kioskId:o.kioskId,amount:Number(o.total||0),method:o.paymentMethod,reference:o.paymentReference,status:"Pagado",commission:0.30,paidDate:o.paidAt||nowISO()}));
+    if(paymentRows.length){
+      const pb=await Promise.all(paymentRows.map(x=>build("payments",x)));
+      const pr=await fetch(api()+"payments",{method:"POST",headers:headers({Prefer:"return=minimal"}),body:JSON.stringify(pb.map(x=>x.out))});
+      if(!pr.ok)console.warn("Snackly bulk payments",await pr.text());
+    }
+  };
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",bootV10);else bootV10();
+})();
+</script>
+
+
+<script>
+/* ==========================================================
+   SNACKLY V11 — SIMULACIÓN HISTÓRICA DE PEDIDOS
+   Conserva registros existentes. Carga datos determinísticos
+   desde 01/07/2026 y evita duplicados por ID.
+   ========================================================== */
+(function(){
+  const CLOUD=window.SNACKLY_CLOUD||{};
+  const START="2026-07-01", END="2026-09-30";
+  const KIOSK_SEEDS=[
+    {key:"FA36",institution:"IE Fe y Alegría 36",responsible:"Cedano Castillo Rudy Elni",email:"rudycedano1@gmail.com",cardLast4:"3601"},
+    {key:"JCM80041",institution:"Jose Carlos Mariategui 80041",responsible:"Luis Miguel Anajuco Suelpres",email:"luisanajuco10@gmail.com",cardLast4:"4041"},
+    {key:"SMPO",institution:"San Martín de Porres",responsible:"Lucia Palacios Siguas",email:"2002luciapalacios28@gmail.com",cardLast4:"3828"},
+    {key:"DIA",institution:"I.E Dios es Amor",responsible:"VICTORIA AZUCENA PALACIOS SIGUAS",email:"Htaicodiaz@gmail.com",cardLast4:"1975"}
+  ];
+  const STUDENTS=[
+    ["1A",["Valeria Torres","Mateo Rojas","Camila Castillo"]],
+    ["1B",["Luciana Díaz","Diego Sánchez","Alessia Flores"]],
+    ["2A",["Sebastián Vargas","Mía Rodríguez","Thiago Pérez"]],
+    ["3B",["Andrea Mendoza","Adrián Castañeda","Sofía Ramos"]],
+    ["3C",["Daniela Salazar","Bruno Vásquez","Emily Castro"]],
+    ["4C",["Mariana León","Joaquín Silva","Fernanda Cruz"]],
+    ["4D",["Renato Paredes","Gabriela Navarro","Nicolás Ruiz"]],
+    ["5A",["Lucía Herrera","Alejandro Medina","Valentina Soto"]],
+    ["5B",["Martín Espinoza","Ximena Campos","Ángel Morales"]],
+    ["5C",["Paula Guerrero","Cristóbal Vega","Nicole Flores"]]
+  ];
+  const FIRST_NAMES=STUDENTS.flatMap(([grade,names])=>names.map(name=>({name,grade})));
+  const PAYMENTS=["Yape simulado","Plin simulado","Transferencia simulada"];
+  const pad=n=>String(n).padStart(2,"0");
+  const iso=d=>d.toISOString().slice(0,10);
+  const dateAt=(y,m,d)=>new Date(y,m-1,d,10,30,0);
+  const monthDays={7:31,8:31,9:30};
+  function seeded(n){const x=Math.sin(n*12.9898)*43758.5453;return x-Math.floor(x)}
+  function kioskId(k){return "SIM-KQ-"+k.key}
+  function orderId(month,index,k){return `SIM-${month}-${k.key}-${String(index).padStart(3,"0")}`}
+  function productChoices(){
+    const ps=Array.isArray(state.products)?state.products:[];
+    return ps.filter(p=>p&&Number(p.price)>0).slice(0,18);
+  }
+  function chooseItems(seed){
+    const ps=productChoices(); if(!ps.length)return [];
+    const a=ps[Math.floor(seeded(seed)*ps.length)];
+    const items=[{name:a.name,id:a.id,icon:a.icon,qty:1,price:Number(a.price),type:"product"}];
+    if(seeded(seed+3)>0.72){
+      const b=ps[Math.floor(seeded(seed+7)*ps.length)];
+      if(b&&b.id!==a.id)items.push({name:b.name,id:b.id,icon:b.icon,qty:1,price:Number(b.price),type:"product"});
+    }
+    return items;
+  }
+  function monthlyCount(monthIndex){return [20,30,42][monthIndex];}
+  function studentFor(n){return FIRST_NAMES[n%FIRST_NAMES.length]}
+  function buildOrders(kiosk,month,monthIndex){
+    const count=monthlyCount(monthIndex),orders=[];
+    for(let i=1;i<=count;i++){
+      const student=studentFor((monthIndex*97+i*7+kiosk.key.length)%FIRST_NAMES.length);
+      const day=1+Math.floor(seeded(month*100+i*17+kiosk.key.length)*monthDays[month]);
+      const d=dateAt(2026,month,day), items=chooseItems(month*1000+i*13+kiosk.key.length);
+      const total=items.reduce((s,x)=>s+x.price*x.qty,0);
+      const payment=PAYMENTS[(month+i+kiosk.key.length)%PAYMENTS.length];
+      orders.push({
+        id:orderId(month,i,kiosk),source:"simulation",parent:"Familia Snackly",childId:`SIM-ST-${student.grade}-${student.name.replace(/[^A-Za-z0-9]/g,"").slice(0,10)}`,child:student.name,grade:student.grade,
+        institution:kiosk.institution,kioskId:kiosk.id,kioskName:kiosk.institution,agendaQr:`SIM-${student.grade}`,
+        deliveryDate:iso(d),pickupTime:"09:50",pickupWindow:"9:45 a. m. a 10:00 a. m.",pickupDeadline:"10:00 a. m.",exitPickup:"12:45 p. m.",
+        items,total:Number(total.toFixed(2)),paymentMethod:payment,paymentReference:`SIM-${month}${pad(i)}${kiosk.key.slice(0,3)}`,
+        paymentStatus:"Pagado",paymentDecision:"Pagar ahora",orderStatus:i%17===0?"Entregado":"Recibido",
+        created:d.toLocaleString("es-PE"),createdISO:iso(d),paidAt:new Date(d.getTime()-20*60000).toISOString()
+      });
+    }
+    return orders;
+  }
+  async function waitCloud(){
+    for(let i=0;i<20;i++){
+      if(window.snacklyCloudSync && CLOUD.url && CLOUD.anonKey)return true;
+      await new Promise(r=>setTimeout(r,250));
+    }
+    return false;
+  }
+  function localMerge(list,items){
+    const m=new Map((list||[]).map(x=>[String(x.id),x]));
+    items.forEach(x=>m.set(String(x.id),x));
+    return [...m.values()];
+  }
+  async function runSimulation(){
+    if(window.__snacklyV11Running)return;
+    window.__snacklyV11Running=true;
+    try{
+      await waitCloud();
+      try{await window.snacklyCloudSync?.()}catch(e){}
+      const byInst=new Map((state.kiosks||[]).map(k=>[normalizeInstitution(k.institution),k]));
+      const kiosks=[];
+      for(const seed of KIOSK_SEEDS){
+        let k=byInst.get(normalizeInstitution(seed.institution));
+        if(!k){
+          k={id:kioskId(seed),institution:seed.institution,responsible:seed.responsible,email:seed.email,registrationDate:START,cardLast4:seed.cardLast4,active:true,status:"Activa",createdAt:START+"T08:00:00.000Z"};
+        }else{
+          k={...k,active:true,status:"Activa",activeSince:k.activeSince||START};
+          if(!k.registrationDate)k.registrationDate=START;
+        }
+        k.activeSince=k.activeSince||START;
+        kiosks.push(k);
+      }
+      state.kiosks=localMerge(state.kiosks,kiosks);
+      localStorage.setItem(P+"kiosks",JSON.stringify(state.kiosks));
+      localStorage.setItem("sfq_v7_sim_date",END);
+      // Seed subscription history for the four active kiosks without deleting prior records.
+      let subs=[];try{subs=JSON.parse(localStorage.getItem("sfq_v7_subscriptions")||"[]")}catch(e){subs=[]}
+      const subMap=new Map(subs.map(x=>[String(x.id),x]));
+      kiosks.forEach(k=>{
+        const card=k.cardLast4||"----";
+        [
+          {period:"2026-07",amount:0,status:"GRATIS"},
+          {period:"2026-08",amount:3,status:"Pagada"},
+          {period:"2026-09",amount:3,status:"Pagada"}
+        ].forEach((x,j)=>{const id=`SIM-SUB-${k.id}-${j+1}`;if(!subMap.has(id))subMap.set(id,{id,kioskId:k.id,period:x.period,amount:x.amount,status:x.status,cardLast4:card})})
+      });
+      subs=[...subMap.values()];localStorage.setItem("sfq_v7_subscriptions",JSON.stringify(subs));
+      // Build a deterministic increasing history: 20 orders/kiosk in July, 30 in August, 42 in September.
+      const generated=kiosks.flatMap(k=>[0,1,2].flatMap(mi=>buildOrders(k,7+mi,mi)));
+      const localIds=new Set((state.orders||[]).map(o=>String(o.id)));
+      const missing=generated.filter(o=>!localIds.has(String(o.id)));
+      state.orders=localMerge(state.orders,missing);
+      // Also register the simulated students locally so the administrative user count
+      // reflects the students represented by the historical orders, without touching real children.
+      const realChildIds=new Set((state.children||[]).map(c=>String(c.id)));
+      const simulatedChildren=FIRST_NAMES.map((st,i)=>({id:`SIM-CH-${i+1}`,name:st.name,grade:st.grade,institution:KIOSK_SEEDS[i%KIOSK_SEEDS.length].institution,agendaQr:`SIM-QR-${i+1}`,simulation:true}));
+      const childrenToAdd=simulatedChildren.filter(c=>!realChildIds.has(c.id));
+      state.children=localMerge(state.children,childrenToAdd);
+      save();
+      if(window.snacklySeedCentralData){
+        await window.snacklySeedCentralData(kiosks,missing);
+      }
+      renderAll?.();applyRole?.();window.renderSnacklyAdmin?.();
+      console.info(`Snackly V11: ${kiosks.length} quioscos y ${missing.length} pedidos simulados agregados. Periodo ${START} a ${END}.`);
+    }catch(e){console.warn("Snackly V11 simulation",e)}
+    finally{window.__snacklyV11Running=false}
+  }
+  window.snacklyRunSimulation=runSimulation;
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>setTimeout(runSimulation,1200));
+  else setTimeout(runSimulation,1200);
+})();
+</script>
+
+
+<script>
+/* ==========================================================
+   SNACKLY V12 — SELECTOR DE I.E. EN PANEL DEL QUIOSCO
+   Mantiene V7/V10/V11 y agrega únicamente el cambio de quiosco.
+   No elimina ni reemplaza registros existentes.
+   ========================================================== */
+(function(){
+  function activeKiosks(){
+    return (Array.isArray(state.kiosks)?state.kiosks:[]).filter(k=>k && k.active!==false);
+  }
+  function selected(){
+    const list=activeKiosks();
+    const id=localStorage.getItem(P+"currentKioskId")||"";
+    let k=list.find(x=>String(x.id)===String(id));
+    if(!k && list.length){
+      k=list[0];
+      localStorage.setItem(P+"currentKioskId",k.id);
+      try{localStorage.setItem("sfq_v7_kiosk",JSON.stringify(k))}catch(e){}
+    }
+    return k||null;
+  }
+  function choose(id){
+    const k=activeKiosks().find(x=>String(x.id)===String(id));
+    if(!k){toast("No se encontró el quiosco seleccionado.");return}
+    localStorage.setItem(P+"currentKioskId",k.id);
+    try{localStorage.setItem("sfq_v7_kiosk",JSON.stringify(k))}catch(e){}
+    refreshInstitutionOptions?.();
+    renderAll?.();
+    toast(`Quiosco seleccionado: ${k.institution}`);
+  }
+  window.snacklySelectKiosk=choose;
+  window.snacklyOpenKioskSelector=function(){
+    const list=activeKiosks(),cur=selected();
+    let m=document.getElementById("snacklyKioskSelectorModal");
+    if(!m){
+      m=document.createElement("div");m.id="snacklyKioskSelectorModal";m.className="modal-wrap hidden";
+      document.body.appendChild(m);
+    }
+    m.innerHTML=`<div class="modal" style="max-width:760px;max-height:90vh;overflow:auto;position:relative">
+      <button type="button" aria-label="Cerrar" onclick="document.getElementById('snacklyKioskSelectorModal').classList.add('hidden')" style="position:absolute;right:14px;top:14px;border:0;background:#eef3f8;border-radius:10px;width:36px;height:36px;font-weight:900;font-size:18px">×</button>
+      <h2 style="padding-right:48px">🏫 Seleccionar I.E. / quiosco</h2>
+      <p style="color:var(--muted);margin-bottom:16px">Selecciona el quiosco que deseas gestionar. Los pedidos, ventas y estadísticas del panel cambiarán según la I.E. elegida.</p>
+      <div style="display:grid;gap:10px">
+        ${list.map(k=>`<button type="button" onclick="snacklySelectKiosk('${String(k.id).replace(/'/g,"\\'")}');document.getElementById('snacklyKioskSelectorModal').classList.add('hidden')" style="text-align:left;border:1px solid #dce5ef;background:#fff;border-radius:14px;padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;gap:12px;align-items:center;box-shadow:0 2px 8px rgba(15,35,60,.05)">
+          <span><strong style="display:block;color:#16324f">🏫 ${escapeHtml(k.institution)}</strong><small style="color:#6b7c8f">Encargado: ${escapeHtml(k.responsible||"")}</small><small style="display:block;color:#6b7c8f">Activo desde: ${escapeHtml(k.registrationDate||k.activeSince||"01/07/2026")}</small></span>
+          <span style="white-space:nowrap;color:#198754;font-weight:800">${cur?.id===k.id?'✓ ACTUAL':'● ACTIVO'}</span>
+        </button>`).join("") || `<div class="empty">No hay quioscos activos registrados.</div>`}
+      </div>
+    </div>`;
+    m.classList.remove("hidden");
+  };
+  function renderSelector(){
+    const host=document.getElementById("kioskSubscriptionInfo");
+    if(!host)return;
+    const list=activeKiosks(),k=selected();
+    if(!k)return;
+    const options=list.map(q=>`<option value="${escapeHtml(String(q.id))}" ${q.id===k.id?'selected':''}>${escapeHtml(q.institution)}</option>`).join("");
+    const existing=document.getElementById("snacklyKioskSelectorBar");
+    const html=`<div id="snacklyKioskSelectorBar" style="margin-bottom:14px;border:1px solid #dce5ef;background:#f7fafc;border-radius:14px;padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="min-width:240px;flex:1"><small style="display:block;color:#66788a;font-weight:800;text-transform:uppercase;letter-spacing:.04em">QUIOSCO ACTIVO</small>
+          <select id="snacklyKioskSelect" onchange="snacklySelectKiosk(this.value)" style="margin-top:6px;width:100%;max-width:520px;border:1px solid #cbd7e3;border-radius:10px;padding:10px 12px;background:#fff;font-weight:800;color:#16324f">
+            ${options}
+          </select>
+        </div>
+        <button type="button" class="btn btn-soft" onclick="snacklyOpenKioskSelector()">🏫 Cambiar I.E.</button>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;color:#5e7184;font-size:13px">
+        <span>● <strong style="color:#198754">ACTIVO</strong></span>
+        <span>Desde: <strong>${escapeHtml(k.registrationDate||k.activeSince||"01/07/2026")}</strong></span>
+        <span>Pedidos de esta I.E.: <strong>${kioskOrders().length}</strong></span>
+      </div>
+    </div>`;
+    if(existing)existing.outerHTML=html;else host.insertAdjacentHTML("afterbegin",html);
+  }
+  const oldRenderKioskV12=window.renderKiosk;
+  window.renderKiosk=function(){
+    selected();
+    oldRenderKioskV12?.apply(this,arguments);
+    renderSelector();
+    const k=selected();
+    const title=document.querySelector('#kioskSubscriptionInfo > strong');
+    if(title&&k)title.textContent=`🏪 ${k.institution}`;
+  };
+  function bootV12(){
+    selected();
+    setTimeout(()=>{try{renderAll?.()}catch(e){console.warn('Snackly V12 render',e)}},80);
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",bootV12);else bootV12();
+})();
+</script>
+
 </body>
 </html>
